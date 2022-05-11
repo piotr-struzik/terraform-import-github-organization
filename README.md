@@ -1,3 +1,8 @@
+# Forked from unmaintained (but great) https://github.com/chrisanthropic/terraform-import-github-organization
+Changes: 
+  - support latest Terraform (1.1.9)
+  - support latest GitHub API
+
 # WHAT
 It's a simple bash script to simply import a Github Organization into Terraform. It uses the Github API and Terraform CLI to import the following resources:
 - all public repos (includes pagination support for Orgs with 100+ repos)
@@ -20,7 +25,7 @@ Imports all public repos owned by the organization (includes full pagination sup
 ```
 resource "github_repository" "$PUBLIC_REPO_NAME" {
   name        = "$PUBLIC_REPO_NAME"
-  private     = false
+  visibility  = "public"
   description = "$PUBLIC_REPO_DESCRIPTION"
   has_wiki    = "$PUBLIC_REPO_WIKI"
   has_downloads = "$PUBLIC_REPO_DOWNLOADS"
@@ -34,7 +39,7 @@ Imports all private repos owned by the organization (includes full pagination su
 ```
 resource "github_repository" "$PRIVATE_REPO_NAME" {
   name        = "$PRIVATE_REPO_NAME"
-  private     = true
+  visibility  = "private"
   description = "$PRIVATE_REPO_DESCRIPTION"
   has_wiki    = "$PRIVATE_REPO_WIKI"
   has_downloads = "$PRIVATE_REPO_DOWNLOADS"
@@ -96,26 +101,20 @@ resource "github_membership" "$USER_NAME" {
 
 ### Do it
 - `git clone` this repo
-- create a basic terraform configuration file, e.g. `main.tf` with
+- create a basic terraform configuration file or user included `terraform.tf` with
   something like:
 
   ```hcl
-  provider "github" {
-    token        = "TOKENGOESHERE"
-    organization = "my_org"
-    # optional, if using GitHub Enterprise
-    base_url     =  "https://github.mycompany.com/api/v3/"
-  }
+  provider "github" {}
   ```
 - run `terraform init` to e.g. install the GitHub provider
-- configure the variables at the top of the script
+- set enviroment variables 
   - `GITHUB_TOKEN=...`
-  - `ORG=...`
+  - `GITHUB_OWNER=...`
   - if you're using GitHub Enterprise, `API_URL_PREFIX=...`
-  or remember to pass them in via the environment
 - run the scriptm, perhaps passing the necessary environment variables
   ```
-  GITHUB_TOKEN=12334...4555 ORG=my_org terraform-import-github-org.sh
+  GITHUB_TOKEN=12334...4555 GITHUB_OWNER=my_org terraform-import-github-org.sh
   ```
 - run a terraform plan to see that everything was imported and that no changes are required.
   - some manual modifications _could_ be required since not every field supported by Terraform has been implemented by this script.
