@@ -5,7 +5,7 @@ set -euo pipefail
 ## GLOBAL VARIABLES
 ###
 GITHUB_TOKEN=${GITHUB_TOKEN:-''}
-ORG=${ORG:-''}
+GITHUB_OWNER=${GITHUB_OWNER:-''}
 API_URL_PREFIX=${API_URL_PREFIX:-'https://api.github.com'}
 
 ###
@@ -16,7 +16,7 @@ API_URL_PREFIX=${API_URL_PREFIX:-'https://api.github.com'}
   # You can only list 100 items per page, so you can only clone 100 at a time.
   # This function uses the API to calculate how many pages of public repos you have.
 get_public_pagination () {
-    public_pages=$(curl -I "${API_URL_PREFIX}/orgs/${ORG}/repos?access_token=${GITHUB_TOKEN}&type=public&per_page=100" | grep -Eo '&page=\d+' | grep -Eo '[0-9]+' | tail -1;)
+    public_pages=$(curl -s -I --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/repos?type=public&per_page=100" | grep -Eo '&page=\d+' | grep -Eo '[0-9]+' | tail -1;)
     echo "${public_pages:-1}"
 }
   # This function uses the output from above and creates an array counting from 1->$ 
@@ -27,9 +27,9 @@ limit_public_pagination () {
   # Now lets import the repos, starting with page 1 and iterating through the pages
 import_public_repos () {
   for PAGE in $(limit_public_pagination); do
-  
-    for i in $(curl -s "${API_URL_PREFIX}/orgs/${ORG}/repos?access_token=${GITHUB_TOKEN}&type=public&page=${PAGE}&per_page=100" | jq -r 'sort_by(.name) | .[] | .name'); do
-      PUBLIC_REPO_PAYLOAD=$(curl -s "${API_URL_PREFIX}/repos/${ORG}/${i}?access_token=${GITHUB_TOKEN}" -H "Accept: application/vnd.github.mercy-preview+json")
+
+    for i in $(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/repos?type=public&page=${PAGE}&per_page=100" | jq -r 'sort_by(.name) | .[] | .name'); do
+      PUBLIC_REPO_PAYLOAD=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/repos/${GITHUB_OWNER}/${i}" -H "Accept: application/vnd.github.mercy-preview+json")
   
       PUBLIC_REPO_DESCRIPTION=$(echo "$PUBLIC_REPO_PAYLOAD" | jq -r '.description | select(type == "string")' | sed "s/\"/'/g")
       PUBLIC_REPO_DOWNLOADS=$(echo "$PUBLIC_REPO_PAYLOAD" | jq -r .has_downloads)
@@ -55,7 +55,7 @@ resource "github_repository" "${TERRAFORM_PUBLIC_REPO_NAME}" {
   name               = "${i}"
   topics             = ${PUBLIC_REPO_TOPICS}
   description        = "${PUBLIC_REPO_DESCRIPTION}"
-  private            = false
+  visibility         = "public"
   has_wiki           = ${PUBLIC_REPO_WIKI}
   has_projects       = ${PUBLIC_REPO_PROJECTS}
   has_downloads      = ${PUBLIC_REPO_DOWNLOADS}
@@ -72,6 +72,7 @@ resource "github_repository" "${TERRAFORM_PUBLIC_REPO_NAME}" {
 EOF
 
       # Import the Repo
+      echo "terraform import \"github_repository.${TERRAFORM_PUBLIC_REPO_NAME}\" \"${i}\""
       terraform import "github_repository.${TERRAFORM_PUBLIC_REPO_NAME}" "${i}"
     done
   done
@@ -79,7 +80,7 @@ EOF
 
 # Private Repos
 get_private_pagination () {
-    priv_pages=$(curl -I "${API_URL_PREFIX}/orgs/${ORG}/repos?access_token=${GITHUB_TOKEN}&type=private&per_page=100" | grep -Eo '&page=\d+' | grep -Eo '[0-9]+' | tail -1;)
+    priv_pages=$(curl -s -I --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/repos?type=private&per_page=100" | grep -Eo '&page=\d+' | grep -Eo '[0-9]+' | tail -1;)
     echo "${priv_pages:-1}"
 }
 
@@ -90,8 +91,8 @@ limit_private_pagination () {
 import_private_repos () {
   for PAGE in $(limit_private_pagination); do
 
-    for i in $(curl -s "${API_URL_PREFIX}/orgs/${ORG}/repos?access_token=${GITHUB_TOKEN}&type=private&page=${PAGE}&per_page=100" | jq -r 'sort_by(.name) | .[] | .name'); do
-      PRIVATE_REPO_PAYLOAD=$(curl -s "${API_URL_PREFIX}/repos/${ORG}/${i}?access_token=${GITHUB_TOKEN}" -H "Accept: application/vnd.github.mercy-preview+json")
+    for i in $(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/repos?type=private&page=${PAGE}&per_page=100" | jq -r 'sort_by(.name) | .[] | .name'); do
+      PRIVATE_REPO_PAYLOAD=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/repos/${GITHUB_OWNER}/${i}" -H "Accept: application/vnd.github.mercy-preview+json")
 
       PRIVATE_REPO_DESCRIPTION=$(echo "$PRIVATE_REPO_PAYLOAD" | jq -r '.description | select(type == "string")' | sed "s/\"/'/g")
       PRIVATE_REPO_DOWNLOADS=$(echo "$PRIVATE_REPO_PAYLOAD" | jq -r .has_downloads)
@@ -115,7 +116,7 @@ import_private_repos () {
       cat >> github-private-repos.tf << EOF
 resource "github_repository" "${TERRAFORM_PRIVATE_REPO_NAME}" {
   name               = "${i}"
-  private            = true
+  visibility         = "private"
   description        = "${PRIVATE_REPO_DESCRIPTION}"
   has_wiki           = ${PRIVATE_REPO_WIKI}
   has_projects       = ${PRIVATE_REPO_PROJECTS}
@@ -134,6 +135,7 @@ resource "github_repository" "${TERRAFORM_PRIVATE_REPO_NAME}" {
 
 EOF
       # Import the Repo
+      echo "terraform import \"github_repository.${TERRAFORM_PRIVATE_REPO_NAME}\" \"${i}\""
       terraform import "github_repository.${TERRAFORM_PRIVATE_REPO_NAME}" "${i}"
     done
   done
@@ -141,9 +143,9 @@ EOF
 
 # Users
 import_users () {
-  for i in $(curl -s "${API_URL_PREFIX}/orgs/${ORG}/members?access_token=${GITHUB_TOKEN}&per_page=100" | jq -r 'sort_by(.login) | .[] | .login'); do
+  for i in $(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/members?per_page=100" | jq -r 'sort_by(.login) | .[] | .login'); do
 
-  MEMBERSHIP_ROLE=$(curl -s "${API_URL_PREFIX}/orgs/${ORG}/memberships/${i}?access_token=${GITHUB_TOKEN}" | jq -r .role)
+  MEMBERSHIP_ROLE=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/memberships/${i}" | jq -r .role)
 
   cat >> github-users.tf << EOF
 resource "github_membership" "${i}" {
@@ -151,14 +153,14 @@ resource "github_membership" "${i}" {
   role            = "${MEMBERSHIP_ROLE}"
 }
 EOF
-    terraform import "github_membership.${i}" "${ORG}:${i}"
+    terraform import "github_membership.${i}" "${GITHUB_OWNER}:${i}"
   done
 }
 
 # Teams
 import_teams () {
-  for i in $(curl -s "${API_URL_PREFIX}/orgs/${ORG}/teams?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'); do
-    TEAM_PAYLOAD=$(curl -s "${API_URL_PREFIX}/teams/${i}?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json")
+  for i in $(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/teams?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'); do
+    TEAM_PAYLOAD=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/teams/${i}?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json")
 
     TEAM_NAME=$(echo "$TEAM_PAYLOAD" | jq -r .name)
     TEAM_NAME_NO_SPACE=`echo $TEAM_NAME | tr " " "_" | tr "/" "_"`
@@ -184,20 +186,20 @@ resource "github_team" "${TEAM_NAME_NO_SPACE}" {
 }
 EOF
     fi
-
+    echo "terraform import \"github_team.${TEAM_NAME_NO_SPACE}\" \"${i}\""
     terraform import "github_team.${TEAM_NAME_NO_SPACE}" "${i}"
   done
 }
 
 # Team Memberships 
 import_team_memberships () {
-  for i in $(curl -s "${API_URL_PREFIX}/orgs/${ORG}/teams?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'); do
+  for i in $(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/teams?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'); do
   
-  TEAM_NAME=$(curl -s "${API_URL_PREFIX}/teams/${i}?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r .name | tr " " "_" | tr "/" "_")
+  TEAM_NAME=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/teams/${i}?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r .name | tr " " "_" | tr "/" "_")
   
-    for j in $(curl -s "${API_URL_PREFIX}/teams/${i}/members?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r .[].login); do
+    for j in $(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/teams/${i}/members?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r .[].login); do
     
-      TEAM_ROLE=$(curl -s "${API_URL_PREFIX}/teams/${i}/memberships/${j}?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r .role)
+      TEAM_ROLE=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/teams/${i}/memberships/${j}?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r .role)
 
       if [[ "${TEAM_ROLE}" == "maintainer" ]]; then
         cat >> "github-team-memberships-${TEAM_NAME}.tf" << EOF
@@ -216,13 +218,14 @@ resource "github_team_membership" "${TEAM_NAME}-${j}" {
 }
 EOF
       fi
+      echo "terraform import \"github_team_membership.${TEAM_NAME}-${j}\" \"${i}:${j}\"" 
       terraform import "github_team_membership.${TEAM_NAME}-${j}" "${i}:${j}"
     done
   done
 }
 
 get_team_pagination () {
-    team_pages=$(curl -I "${API_URL_PREFIX}/orgs/${ORG}/repos?access_token=${GITHUB_TOKEN}&per_page=100" | grep -Eo '&page=\d+' | grep -Eo '[0-9]+' | tail -1;)
+    team_pages=$(curl -s -I --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/repos?per_page=100" | grep -Eo '&page=\d+' | grep -Eo '[0-9]+' | tail -1;)
     echo "${team_pages:-1}"
 }
   # This function uses the out from above and creates an array counting from 1->$ 
@@ -231,19 +234,19 @@ limit_team_pagination () {
 }
 
 get_team_ids () {
-  echo   curl -s "${API_URL_PREFIX}/orgs/${ORG}/teams?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'
-  curl -s "${API_URL_PREFIX}/orgs/${ORG}/teams?access_token=${GITHUB_TOKEN}&per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'
+  echo   curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/teams?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'
+  curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/orgs/${GITHUB_OWNER}/teams?per_page=100" -H "Accept: application/vnd.github.hellcat-preview+json" | jq -r 'sort_by(.name) | .[] | .id'
 }
 
 get_team_repos () {
   for PAGE in $(limit_team_pagination); do
 
-    for i in $(curl -s "${API_URL_PREFIX}/teams/${TEAM_ID}/repos?access_token=${GITHUB_TOKEN}&page=${PAGE}&per_page=100" | jq -r 'sort_by(.name) | .[] | .name'); do
+    for i in $(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/teams/${TEAM_ID}/repos?page=${PAGE}&per_page=100" | jq -r 'sort_by(.name) | .[] | .name'); do
     
     TERRAFORM_TEAM_REPO_NAME=$(echo "${i}" | tr  "."  "-")
-    TEAM_NAME=$(curl -s "${API_URL_PREFIX}/teams/${TEAM_ID}?access_token=${GITHUB_TOKEN}" | jq -r .name | tr " " "_" | tr "/" "_")
+    TEAM_NAME=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/teams/${TEAM_ID}" | jq -r .name | tr " " "_" | tr "/" "_")
 
-    PERMS_PAYLOAD=$(curl -s "${API_URL_PREFIX}/teams/${TEAM_ID}/repos/${ORG}/${i}?access_token=${GITHUB_TOKEN}" -H "Accept: application/vnd.github.v3.repository+json")
+    PERMS_PAYLOAD=$(curl -s --header "Authorization: Bearer ${GITHUB_TOKEN}" "${API_URL_PREFIX}/teams/${TEAM_ID}/repos/${GITHUB_OWNER}/${i}" -H "Accept: application/vnd.github.v3.repository+json")
     ADMIN_PERMS=$(echo "$PERMS_PAYLOAD" | jq -r .permissions.admin )
     PUSH_PERMS=$(echo "$PERMS_PAYLOAD" | jq -r .permissions.push )
     PULL_PERMS=$(echo "$PERMS_PAYLOAD" | jq -r .permissions.pull )
@@ -276,6 +279,8 @@ resource "github_team_repository" "${TEAM_NAME}-${TERRAFORM_TEAM_REPO_NAME}" {
 
 EOF
     fi
+
+    echo "terraform import \"github_team_repository.${TEAM_NAME}-${TERRAFORM_TEAM_REPO_NAME}\" \"${TEAM_ID}:${i}\"" 
     terraform import "github_team_repository.${TEAM_NAME}-${TERRAFORM_TEAM_REPO_NAME}" "${TEAM_ID}:${i}"
     done
   done
